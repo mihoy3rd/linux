@@ -197,6 +197,14 @@ struct sock_common {
 	struct proto		*skc_prot;
 	possible_net_t		skc_net;
 
+#ifdef VENDOR_EDIT
+//Jiemin.Zhu@PSW.Android.OppoFeature.TrafficMonitor, 2016/10/28,
+//add for count TCP_TIME_WAIT state to corresponding process
+	uid_t skcm_uid;
+	char skc_cmdline[TASK_COMM_LEN];
+#endif /* VENDOR_EDIT */
+
+
 #if IS_ENABLED(CONFIG_IPV6)
 	struct in6_addr		skc_v6_daddr;
 	struct in6_addr		skc_v6_rcv_saddr;
@@ -354,6 +362,13 @@ struct sock {
 #define sk_incoming_cpu		__sk_common.skc_incoming_cpu
 #define sk_flags		__sk_common.skc_flags
 #define sk_rxhash		__sk_common.skc_rxhash
+#ifdef VENDOR_EDIT
+//Jiemin.Zhu@PSW.Android.OppoFeature.TrafficMonitor, 2016/10/28,
+//add for count TCP_TIME_WAIT state to corresponding process
+#define skc_uid			__sk_common.skcm_uid
+#define sk_cmdline			__sk_common.skc_cmdline
+#endif /* VENDOR_EDIT */
+//#ifdef VENDOR_EDIT
 
 	socket_lock_t		sk_lock;
 	struct sk_buff_head	sk_receive_queue;
@@ -446,6 +461,7 @@ struct sock {
 	void			*sk_security;
 #endif
 	__u32			sk_mark;
+	kuid_t			sk_uid;
 #ifdef CONFIG_CGROUP_NET_CLASSID
 	u32			sk_classid;
 #endif
@@ -1067,6 +1083,7 @@ struct proto {
 	void			(*destroy_cgroup)(struct mem_cgroup *memcg);
 	struct cg_proto		*(*proto_cgroup)(struct mem_cgroup *memcg);
 #endif
+	int			(*diag_destroy)(struct sock *sk, int err);
 };
 
 int proto_register(struct proto *prot, int alloc_slab);
@@ -1691,12 +1708,18 @@ static inline void sock_graft(struct sock *sk, struct socket *parent)
 	sk->sk_wq = parent->wq;
 	parent->sk = sk;
 	sk_set_socket(sk, parent);
+	sk->sk_uid = SOCK_INODE(parent)->i_uid;
 	security_sock_graft(sk, parent);
 	write_unlock_bh(&sk->sk_callback_lock);
 }
 
 kuid_t sock_i_uid(struct sock *sk);
 unsigned long sock_i_ino(struct sock *sk);
+
+static inline kuid_t sock_net_uid(const struct net *net, const struct sock *sk)
+{
+	return sk ? sk->sk_uid : make_kuid(net->user_ns, 0);
+}
 
 static inline u32 net_tx_rndhash(void)
 {

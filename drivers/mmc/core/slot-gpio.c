@@ -36,6 +36,12 @@ static irqreturn_t mmc_gpio_cd_irqt(int irq, void *dev_id)
 	struct mmc_host *host = dev_id;
 
 	host->trigger_card_event = true;
+    
+#ifdef VENDOR_EDIT
+        //Lycan.Wang@Prd.BasicDrv, 2014-07-10 Add for retry 5 times when new sdcard init error
+        host->detect_change_retry = 5;
+#endif /* VENDOR_EDIT */
+    
 	mmc_detect_change(host, msecs_to_jiffies(200));
 
 	return IRQ_HANDLED;
@@ -145,6 +151,8 @@ void mmc_gpiod_request_cd_irq(struct mmc_host *host)
 			ctx->cd_label, host);
 		if (ret < 0)
 			irq = ret;
+		else
+			enable_irq_wake(irq);
 	}
 
 	host->slot.cd_irq = irq;

@@ -148,7 +148,7 @@ PHONY += $(MAKECMDGOALS) sub-make
 $(filter-out _all sub-make $(CURDIR)/Makefile, $(MAKECMDGOALS)) _all: sub-make
 	@:
 
-sub-make: FORCE
+sub-make:
 	$(Q)$(MAKE) -C $(KBUILD_OUTPUT) KBUILD_SRC=$(CURDIR) \
 	-f $(CURDIR)/Makefile $(filter-out _all sub-make,$(MAKECMDGOALS))
 
@@ -303,7 +303,7 @@ CONFIG_SHELL := $(shell if [ -x "$$BASH" ]; then echo $$BASH; \
 
 HOSTCC       = gcc
 HOSTCXX      = g++
-HOSTCFLAGS   = -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89
+HOSTCFLAGS   := -Wall -Wmissing-prototypes -Wstrict-prototypes -O2 -fomit-frame-pointer -std=gnu89
 HOSTCXXFLAGS = -O2
 
 ifeq ($(shell $(HOSTCC) -v 2>&1 | grep -c "clang version"), 1)
@@ -371,6 +371,7 @@ LDFLAGS_MODULE  =
 CFLAGS_KERNEL	=
 AFLAGS_KERNEL	=
 CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage -fno-tree-loop-im
+CFLAGS_KCOV	= -fsanitize-coverage=trace-pc
 
 
 # Use USERINCLUDE when you must reference the UAPI directories only.
@@ -389,7 +390,8 @@ LINUXINCLUDE    := \
 		-Iarch/$(hdr-arch)/include/generated \
 		$(if $(KBUILD_SRC), -I$(srctree)/include) \
 		-Iinclude \
-		$(USERINCLUDE)
+		$(USERINCLUDE)\
+		-I$(srctree)/drivers/misc/mediatek/include
 
 KBUILD_CPPFLAGS := -D__KERNEL__
 
@@ -399,7 +401,6 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 		   -Wno-format-security \
 		   -std=gnu89 $(call cc-option,-fno-PIE)
 
-
 KBUILD_AFLAGS_KERNEL :=
 KBUILD_CFLAGS_KERNEL :=
 KBUILD_AFLAGS   := -D__ASSEMBLY__ $(call cc-option,-fno-PIE)
@@ -407,18 +408,147 @@ KBUILD_AFLAGS_MODULE  := -DMODULE
 KBUILD_CFLAGS_MODULE  := -DMODULE
 KBUILD_LDFLAGS_MODULE := -T $(srctree)/scripts/module-common.lds
 
+#ifdef  VENDOR_EDIT
+#LiPing-m@PSW.MM.Display.LCD.Machine, 2017/11/03, Add for VENDOR_EDIT macro in kernel
+KBUILD_CFLAGS +=   -DVENDOR_EDIT
+KBUILD_CPPFLAGS += -DVENDOR_EDIT
+CFLAGS_KERNEL +=   -DVENDOR_EDIT
+CFLAGS_MODULE +=   -DVENDOR_EDIT
+#endif /* VENDOR_EDIT */
+#ifdef VENDOR_EDIT
+#//Liang.Zhang@PSW.TECH.Bootup, 2018/10/19, Add for kernel monitor whole bootup
+#ifdef HANG_OPPO_ALL
+KBUILD_CFLAGS +=   -DHANG_OPPO_ALL
+KBUILD_CPPFLAGS += -DHANG_OPPO_ALL
+CFLAGS_KERNEL +=   -DHANG_OPPO_ALL
+CFLAGS_MODULE +=   -DHANG_OPPO_ALL
+#ifdef VENDOR_EDIT
+#Bin.Yan@PSW.AD.BuildConfig.BaseConfig.1068615, 2017/08/28,Add for disallow system remount
+ifneq ($(SPECIAL_OPPO_CONFIG),1)
+ifneq ($(SPECIAL_OPPO_PERFORMANCE),1)
+    ifneq ($(filter release,$(OPPO_BUILD_TYPE)),)
+        ifneq ($(OPPO_ALLOW_KEY_INTERFACES),true)
+            ifeq ($(filter allnetcttest allnetcmcctest allnetcmccfield allnetctfield,$(NET_BUILD_TYPE)),)
+                KBUILD_CFLAGS += -DOPPO_DISALLOW_KEY_INTERFACES
+            endif
+        endif
+    endif
+endif
+endif
+#endif /* VENDOR_EDIT */
+
+#ifdef VENDOR_EDIT
+#Haiping.Zhong@PSW.AD.BuildConfig.BaseConfig.0, 2019/01/08, Add for build root disable dm verity
+ifeq ($(OPPO_BUILD_ROOT_DISABLE_DM_VERITY),true)
+    KBUILD_CFLAGS += -DOPPO_BUILD_ROOT_DISABLE_DM_VERITY
+endif
+#endif /* VENDOR_EDIT */
+
+#ifdef VENDOR_EDIT
+#ye.zhang@Sensor.config,2016-09-09, add for CTSI support external storage or not
+$(info @@@@@@@@@@@ 111 OPPO_BUILD_CUSTOMIZE is $(OPPO_BUILD_CUSTOMIZE))
+ifneq ($(OPPO_BUILD_CUSTOMIZE),)
+$(info @@@@@@@@@@@ 222 OPPO_BUILD_CUSTOMIZE is $(OPPO_BUILD_CUSTOMIZE))
+KBUILD_CFLAGS += -DMOUNT_EXSTORAGE_IF
+KBUILD_CPPFLAGS += -DMOUNT_EXSTORAGE_IF
+CFLAGS_KERNEL += -DMOUNT_EXSTORAGE_IF
+CFLAGS_MODULE += -DMOUNT_EXSTORAGE_IF
+endif
+
+#ifdef VENDOR_EDIT
+#xing.xiong@BSP.Kernel.Driver, 2018/10/16, Add for oppo reserve partition
+ifneq ($(filter oppo6771_17197 oppo6771_18311 oppo6771_17331 oppo6771_17061 oppo6771_18011, $(OPPO_TARGET_DEVICE)),)
+CFLAGS_KERNEL += -DOPPO_RESERVE_USE_LEGACY
+CFLAGS_MODULE += -DOPPO_RESERVE_USE_LEGACY
+endif
+
+#ifdef VENDOR_EDIT
+#Tong.Han@Bsp.Group.Stability, 2017/07/28, Add for aging test version config
+ifeq ($(SPECIAL_OPPO_CONFIG),1)
+KBUILD_CFLAGS += -DCONFIG_OPPO_SPECIAL_BUILD
+#Wen.Luo@Bsp.Kernel.Stability, 2018/12/05, Add for Debug Config, DEATH_HEALER config
+#OPPO_AGING_TEST := true
+endif
+#endif /* VENDOR_EDIT */
+
+#ifdef VENDOR_EDIT
+#Wen.Luo@Bsp.Kernel.Stability, 2018/12/05, Add for Debug Config, slub/kmemleak/kasan config
+ifeq ($(OPPO_SLUB_CONFIG),1)
+OPPO_SLUB_TEST := true
+endif
+
+ifeq ($(OPPO_KASAN_CONFIG),1)
+OPPO_KASAN_TEST := true
+OPPO_SLUB_TEST := true
+endif
+
+ifeq ($(OPPO_KMEMLEAK_CONFIG),1)
+OPPO_KMEMLEAK_TEST := true
+endif
+
+ifeq ($(OPPO_BUILD_TYPE),release)
+    $(info  wendebug kernel release)
+    ifneq ($(SPECIAL_OPPO_CONFIG),1)
+        OPPO_SLUB_TEST :=
+        OPPO_KASAN_TEST :=
+        OPPO_KMEMLEAK_TEST :=
+    endif
+endif
+#endif /* VENDOR_EDIT */
+
+#ifdef VENDOR_EDIT
+#Qiao.Hu@BSP.CHG.Basic, 2017/12/18,add for recogonizing release build
+ifeq ($(OPPO_BUILD_TYPE),release)
+KBUILD_CFLAGS += -DCONFIG_OPPO_REALEASE_BUILD
+KBUILD_CPPFLAGS += -DCONFIG_OPPO_REALEASE_BUILD
+endif
+#endif /* VENDOR_EDIT */
+
+#ifdef VENDOR_EDIT
+#Jianchao.Shi@PSW.BSP.CHG.Basic, 2019/05/09, sjc Add for 806 high/low temp aging test
+ifeq ($(OPPO_HIGH_TEMP_VERSION),true)
+KBUILD_CFLAGS += -DCONFIG_HIGH_TEMP_VERSION
+KBUILD_CPPFLAGS += -DCONFIG_HIGH_TEMP_VERSION
+endif
+#endif /* VENDOR_EDIT */
+
+#ifdef VENDOR_EDIT
+#Ling.Guo@PSW.MM.Display.LCD, 2018/01/24, Add for cmcc test.
+ifneq ($(filter allnetcmccfield allnetcmcctest allnetctfield allnetcttest allnetcutest,$(NET_BUILD_TYPE)),)
+KBUILD_CFLAGS += -DOPPO_CTTEST_FLAG
+KBUILD_CPPFLAGS += -DOPPO_CTTEST_FLAG
+endif
+#endif /* VENDOR_EDIT */
+
+#Guohua.Zhong@BSP.Storage.Sdcard 2018/01/18 ,add for recogonizing release build
+ifneq ($(filter release cts cta,$(OPPO_BUILD_TYPE)),)
+KBUILD_CFLAGS += -DOPPO_RELEASE_FLAG
+KBUILD_CPPFLAGS += -DOPPO_RELEASE_FLAG
+endif
+ifneq ($(filter cmcctest cmccfield allnetcttest,$(NET_BUILD_TYPE)),)
+KBUILD_CFLAGS += -DOPPO_RELEASE_FLAG
+KBUILD_CPPFLAGS += -DOPPO_RELEASE_FLAG
+endif
+#endif /* VENDOR_EDIT */
+
+#endif//VENDOR_EDIT
 # Read KERNELRELEASE from include/config/kernel.release (if it exists)
 KERNELRELEASE = $(shell cat include/config/kernel.release 2> /dev/null)
 KERNELVERSION = $(VERSION)$(if $(PATCHLEVEL),.$(PATCHLEVEL)$(if $(SUBLEVEL),.$(SUBLEVEL)))$(EXTRAVERSION)
 
-export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION
+#ifdef VENDOR_EDIT
+#Wen.Luo@Bsp.Kernel.Stability, 2018/12/05, Add for aging test, slub debug config
+export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION OPPO_SLUB_TEST OPPO_KASAN_TEST OPPO_KMEMLEAK_TEST OPPO_AGING_TEST
+#else
+#export VERSION PATCHLEVEL SUBLEVEL KERNELRELEASE KERNELVERSION
+#endif
 export ARCH SRCARCH CONFIG_SHELL HOSTCC HOSTCFLAGS CROSS_COMPILE AS LD CC
 export CPP AR NM STRIP OBJCOPY OBJDUMP
 export MAKE AWK GENKSYMS INSTALLKERNEL PERL PYTHON UTS_MACHINE
 export HOSTCXX HOSTCXXFLAGS LDFLAGS_MODULE CHECK CHECKFLAGS
 
 export KBUILD_CPPFLAGS NOSTDINC_FLAGS LINUXINCLUDE OBJCOPYFLAGS LDFLAGS
-export KBUILD_CFLAGS CFLAGS_KERNEL CFLAGS_MODULE CFLAGS_GCOV CFLAGS_KASAN
+export KBUILD_CFLAGS CFLAGS_KERNEL CFLAGS_MODULE CFLAGS_GCOV CFLAGS_KCOV CFLAGS_KASAN
 export KBUILD_AFLAGS AFLAGS_KERNEL AFLAGS_MODULE
 export KBUILD_AFLAGS_MODULE KBUILD_CFLAGS_MODULE KBUILD_LDFLAGS_MODULE
 export KBUILD_AFLAGS_KERNEL KBUILD_CFLAGS_KERNEL
@@ -627,7 +757,7 @@ KBUILD_CFLAGS	+= $(call cc-disable-warning, int-in-bool-context)
 KBUILD_CFLAGS	+= $(call cc-disable-warning, attribute-alias)
 
 ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
-KBUILD_CFLAGS	+= -Os
+KBUILD_CFLAGS	+= $(call cc-option,-Oz,-Os)
 else
 ifdef CONFIG_PROFILE_ALL_BRANCHES
 KBUILD_CFLAGS	+= -O2
@@ -656,7 +786,11 @@ KBUILD_CFLAGS += $(call cc-option,-fno-reorder-blocks,) \
 endif
 
 ifneq ($(CONFIG_FRAME_WARN),0)
+ifneq ($(CONFIG_KASAN), y)
 KBUILD_CFLAGS += $(call cc-option,-Wframe-larger-than=${CONFIG_FRAME_WARN})
+else
+KBUILD_CFLAGS += $(call cc-option,-Wframe-larger-than=6000)
+endif
 endif
 
 # Handle stack protector mode.
@@ -696,12 +830,31 @@ endif
 endif
 KBUILD_CFLAGS += $(stackp-flag)
 
+ifdef CONFIG_KCOV
+  ifeq ($(call cc-option, $(CFLAGS_KCOV)),)
+    $(warning Cannot use CONFIG_KCOV: \
+             -fsanitize-coverage=trace-pc is not supported by compiler)
+    CFLAGS_KCOV =
+  endif
+endif
+
 ifeq ($(cc-name),clang)
+ifneq ($(CROSS_COMPILE),)
+CLANG_TRIPLE    ?= $(CROSS_COMPILE)
+CLANG_TARGET	:= --target=$(notdir $(CLANG_TRIPLE:%-=%))
+GCC_TOOLCHAIN	:= $(realpath $(dir $(shell which $(LD)))/..)
+endif
+ifneq ($(GCC_TOOLCHAIN),)
+CLANG_GCC_TC	:= --gcc-toolchain=$(GCC_TOOLCHAIN)
+endif
+KBUILD_CFLAGS += $(CLANG_TARGET) $(CLANG_GCC_TC)
+KBUILD_AFLAGS += $(CLANG_TARGET) $(CLANG_GCC_TC)
 KBUILD_CPPFLAGS += $(call cc-option,-Qunused-arguments,)
-KBUILD_CPPFLAGS += $(call cc-option,-Wno-unknown-warning-option,)
-KBUILD_CFLAGS += $(call cc-disable-warning, unused-variable)
+KBUILD_CFLAGS += $(call cc-disable-warning, unused-const-variable)
 KBUILD_CFLAGS += $(call cc-disable-warning, format-invalid-specifier)
 KBUILD_CFLAGS += $(call cc-disable-warning, gnu)
+KBUILD_CFLAGS += $(call cc-disable-warning, address-of-packed-member)
+KBUILD_CFLAGS += $(call cc-disable-warning, duplicate-decl-specifier)
 # Quiet clang warning: comparison of unsigned expression < 0 is always false
 KBUILD_CFLAGS += $(call cc-disable-warning, tautological-compare)
 # CLANG uses a _MergedGlobals as optimization, but this breaks modpost, as the
@@ -709,6 +862,8 @@ KBUILD_CFLAGS += $(call cc-disable-warning, tautological-compare)
 # See modpost pattern 2
 KBUILD_CFLAGS += $(call cc-option, -mno-global-merge,)
 KBUILD_CFLAGS += $(call cc-option, -fcatch-undefined-behavior)
+KBUILD_CFLAGS += $(call cc-option, -no-integrated-as)
+KBUILD_AFLAGS += $(call cc-option, -no-integrated-as)
 else
 
 # These warnings generated too much noise in a regular build.
@@ -808,6 +963,9 @@ KBUILD_CFLAGS   += $(call cc-option,-Werror=strict-prototypes)
 
 # Prohibit date/time macros, which would make the build non-deterministic
 KBUILD_CFLAGS   += $(call cc-option,-Werror=date-time)
+
+# temporary workaround clang build errors
+KBUILD_CFLAGS   += $(call cc-disable-warning,enum-conversion,)
 
 # use the deterministic mode of AR if available
 KBUILD_ARFLAGS := $(call ar-option,D)
@@ -1018,7 +1176,7 @@ prepare1: prepare2 $(version_h) include/generated/utsrelease.h \
 
 archprepare: archheaders archscripts prepare1 scripts_basic
 
-prepare0: archprepare FORCE
+prepare0: archprepare
 	$(Q)$(MAKE) $(build)=.
 
 # All the preparing..
@@ -1063,7 +1221,7 @@ INSTALL_FW_PATH=$(INSTALL_MOD_PATH)/lib/firmware
 export INSTALL_FW_PATH
 
 PHONY += firmware_install
-firmware_install: FORCE
+firmware_install:
 	@mkdir -p $(objtree)/firmware
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.fwinst obj=firmware __fw_install
 
@@ -1083,7 +1241,7 @@ PHONY += archscripts
 archscripts:
 
 PHONY += __headers
-__headers: $(version_h) scripts_basic asm-generic archheaders archscripts FORCE
+__headers: $(version_h) scripts_basic asm-generic archheaders archscripts
 	$(Q)$(MAKE) $(build)=scripts build_unifdef
 
 PHONY += headers_install_all
@@ -1296,6 +1454,8 @@ help:
 	@echo  '                    (default: $$(INSTALL_MOD_PATH)/lib/firmware)'
 	@echo  '  dir/            - Build all files in dir and below'
 	@echo  '  dir/file.[ois]  - Build specified target only'
+	@echo  '  dir/file.ll     - Build the LLVM assembly file'
+	@echo  '                    (requires compiler support for LLVM assembly generation)'
 	@echo  '  dir/file.lst    - Build specified mixed source/assembly target only'
 	@echo  '                    (requires a recent binutils and recent build (System.map))'
 	@echo  '  dir/file.ko     - Build module including final link'
@@ -1471,6 +1631,7 @@ clean: $(clean-dirs)
 		-o -name '.*.d' -o -name '.*.tmp' -o -name '*.mod.c' \
 		-o -name '*.symtypes' -o -name 'modules.order' \
 		-o -name modules.builtin -o -name '.tmp_*.o.*' \
+		-o -name '*.ll' \
 		-o -name '*.gcno' \) -type f -print | xargs rm -f
 
 # Generate tags for editors
@@ -1573,6 +1734,8 @@ endif
 %.o: %.S prepare scripts FORCE
 	$(Q)$(MAKE) $(build)=$(build-dir) $(target-dir)$(notdir $@)
 %.symtypes: %.c prepare scripts FORCE
+	$(Q)$(MAKE) $(build)=$(build-dir) $(target-dir)$(notdir $@)
+%.ll: %.c prepare scripts FORCE
 	$(Q)$(MAKE) $(build)=$(build-dir) $(target-dir)$(notdir $@)
 
 # Modules

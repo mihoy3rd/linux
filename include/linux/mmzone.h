@@ -35,6 +35,8 @@
  */
 #define PAGE_ALLOC_COSTLY_ORDER 3
 
+#define MAX_KSWAPD_THREADS 16
+
 enum {
 	MIGRATE_UNMOVABLE,
 	MIGRATE_MOVABLE,
@@ -57,6 +59,13 @@ enum {
 	 */
 	MIGRATE_CMA,
 #endif
+#ifdef VENDOR_EDIT
+/* Hui.Fan@PSW.BSP.Kernel.MM, 2017-8-21
+ * Add a migrate type to manage special page alloc/free
+ */
+	MIGRATE_OPPO0,
+	MIGRATE_OPPO2,
+#endif /* VENDOR_EDIT */
 #ifdef CONFIG_MEMORY_ISOLATION
 	MIGRATE_ISOLATE,	/* can't allocate from here */
 #endif
@@ -65,8 +74,10 @@ enum {
 
 #ifdef CONFIG_CMA
 #  define is_migrate_cma(migratetype) unlikely((migratetype) == MIGRATE_CMA)
+#  define is_migrate_cma_page(_page) (get_pageblock_migratetype(_page) == MIGRATE_CMA)
 #else
 #  define is_migrate_cma(migratetype) false
+#  define is_migrate_cma_page(_page) false
 #endif
 
 #define for_each_migratetype_order(order, type) \
@@ -158,6 +169,17 @@ enum zone_stat_item {
 	WORKINGSET_NODERECLAIM,
 	NR_ANON_TRANSPARENT_HUGEPAGES,
 	NR_FREE_CMA_PAGES,
+#ifdef VENDOR_EDIT
+/* Hui.Fan@PSW.BSP.Kernel.MM, 2017-8-21
+ * Account free pages for MIGRATE_OPPO
+ */
+	NR_FREE_OPPO0_PAGES,
+	NR_FREE_OPPO2_PAGES,
+#endif /* VENDOR_EDIT */
+#ifdef VENDOR_EDIT
+/*Huacai.Zhou@PSW.BSP.Kernel.MM, 2018-09-25, add ion cached account*/
+        NR_IONCACHE_PAGES,
+#endif /* VENDOR_EDIT */
 	NR_VM_ZONE_STAT_ITEMS };
 
 /*
@@ -336,6 +358,14 @@ struct zone {
 	unsigned long watermark[NR_WMARK];
 
 	unsigned long nr_reserved_highatomic;
+
+#ifdef VENDOR_EDIT
+/* Hui.Fan@PSW.BSP.Kernel.MM, 2017-8-21
+ * Number of MIGRATE_OPPO page block.
+ */
+	unsigned long nr_migrate_oppo0_block;
+	unsigned long nr_migrate_oppo2_block;
+#endif /* VENDOR_EDIT */
 
 	/*
 	 * We don't know if the memory that we're going to allocate will be
@@ -621,6 +651,9 @@ struct zonelist {
 #ifndef CONFIG_DISCONTIGMEM
 /* The array of struct pages - for discontigmem use pgdat->lmem_map */
 extern struct page *mem_map;
+#ifdef CONFIG_MTK_MEMCFG
+extern unsigned long mem_map_size;
+#endif
 #endif
 
 /*
@@ -668,8 +701,10 @@ typedef struct pglist_data {
 	int node_id;
 	wait_queue_head_t kswapd_wait;
 	wait_queue_head_t pfmemalloc_wait;
-	struct task_struct *kswapd;	/* Protected by
-					   mem_hotplug_begin/end() */
+	/*
+	 * Protected by mem_hotplug_begin/end()
+	 */
+	struct task_struct *kswapd[MAX_KSWAPD_THREADS];
 	int kswapd_max_order;
 	enum zone_type classzone_idx;
 #ifdef CONFIG_NUMA_BALANCING
@@ -812,7 +847,7 @@ static inline int is_highmem_idx(enum zone_type idx)
 }
 
 /**
- * is_highmem - helper function to quickly check if a struct zone is a 
+ * is_highmem - helper function to quickly check if a struct zone is a
  *              highmem zone or not.  This is an attempt to keep references
  *              to ZONE_{DMA/NORMAL/HIGHMEM/etc} in general code to a minimum.
  * @zone - pointer to struct zone variable
@@ -831,7 +866,11 @@ static inline int is_highmem(struct zone *zone)
 
 /* These two functions are used to setup the per zone pages min values */
 struct ctl_table;
+int kswapd_threads_sysctl_handler(struct ctl_table *, int,
+					void __user *, size_t *, loff_t *);
 int min_free_kbytes_sysctl_handler(struct ctl_table *, int,
+					void __user *, size_t *, loff_t *);
+int watermark_scale_factor_sysctl_handler(struct ctl_table *, int,
 					void __user *, size_t *, loff_t *);
 extern int sysctl_lowmem_reserve_ratio[MAX_NR_ZONES-1];
 int lowmem_reserve_ratio_sysctl_handler(struct ctl_table *, int,

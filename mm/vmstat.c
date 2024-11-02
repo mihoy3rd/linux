@@ -762,7 +762,17 @@ const char * const vmstat_text[] = {
 	"workingset_nodereclaim",
 	"nr_anon_transparent_hugepages",
 	"nr_free_cma",
-
+#ifdef VENDOR_EDIT
+/* Hui.Fan@PSW.BSP.Kernel.MM, 2017-8-21
+ * Account free pages for MIGRATE_OPPO
+ */
+	"nr_free_oppo0",
+	"nr_free_oppo2",
+#endif /* VENDOR_EDIT */
+#ifdef VENDOR_EDIT
+/*Huacai.Zhou@PSW.BSP.Kernel.MM, 2018-09-25, add ion cached account*/
+        "nr_ioncache_pages",
+#endif /*VENDOR_EDIT*/
 	/* enum writeback_stat_item counters */
 	"nr_dirty_threshold",
 	"nr_dirty_background_threshold",
@@ -782,6 +792,7 @@ const char * const vmstat_text[] = {
 
 	"pgfault",
 	"pgmajfault",
+	"pgfmfault",
 
 	TEXTS_FOR_ZONES("pgrefill")
 	TEXTS_FOR_ZONES("pgsteal_kswapd")
@@ -868,6 +879,12 @@ const char * const vmstat_text[] = {
 	"vmacache_find_hits",
 	"vmacache_full_flushes",
 #endif
+
+#ifdef CONFIG_ZONE_MOVABLE_CMA
+	"zmc_lru_migrated",
+	"zmc_lru_migration_nomem",
+#endif /* CONFIG_ZONE_MOVABLE_CMA */
+
 #endif /* CONFIG_VM_EVENTS_COUNTERS */
 };
 #endif /* CONFIG_PROC_FS || CONFIG_SYSFS || CONFIG_NUMA */
@@ -928,6 +945,13 @@ static char * const migratetype_names[MIGRATE_TYPES] = {
 #ifdef CONFIG_CMA
 	"CMA",
 #endif
+#ifdef VENDOR_EDIT
+/* Hui.Fan@PSW.BSP.Kernel.MM, 2017-8-21
+ * Add a migrate type to manage special page alloc/free
+ */
+	"OPPO0",
+	"OPPO2",
+#endif /* VENDOR_EDIT */
 #ifdef CONFIG_MEMORY_ISOLATION
 	"Isolate",
 #endif
@@ -1471,7 +1495,7 @@ static void vmstat_shepherd(struct work_struct *w)
 
 	put_online_cpus();
 
-	schedule_delayed_work(&shepherd,
+	queue_delayed_work(system_unbound_wq, &shepherd,
 		round_jiffies_relative(sysctl_stat_interval));
 
 }
@@ -1489,7 +1513,7 @@ static void __init start_shepherd_timer(void)
 	cpumask_copy(cpu_stat_off, cpu_online_mask);
 
 	vmstat_wq = alloc_workqueue("vmstat", WQ_FREEZABLE|WQ_MEM_RECLAIM, 0);
-	schedule_delayed_work(&shepherd,
+	queue_delayed_work(system_unbound_wq, &shepherd,
 		round_jiffies_relative(sysctl_stat_interval));
 }
 

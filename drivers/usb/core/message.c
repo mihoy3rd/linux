@@ -45,6 +45,7 @@ static int usb_start_wait_urb(struct urb *urb, int timeout, int *actual_length)
 	struct api_context ctx;
 	unsigned long expire;
 	int retval;
+	unsigned long default_timeout = MAX_SCHEDULE_TIMEOUT;
 
 	init_completion(&ctx.done);
 	urb->context = &ctx;
@@ -53,12 +54,15 @@ static int usb_start_wait_urb(struct urb *urb, int timeout, int *actual_length)
 	if (unlikely(retval))
 		goto out;
 
-	expire = timeout ? msecs_to_jiffies(timeout) : MAX_SCHEDULE_TIMEOUT;
+	if (usb_endpoint_num(&urb->ep->desc) > 0 && usb_urb_dir_out(urb))
+		default_timeout = 1000;
+
+	expire = timeout ? msecs_to_jiffies(timeout) : default_timeout;
 	if (!wait_for_completion_timeout(&ctx.done, expire)) {
 		usb_kill_urb(urb);
 		retval = (ctx.status == -ENOENT ? -ETIMEDOUT : ctx.status);
 
-		dev_dbg(&urb->dev->dev,
+		dev_info(&urb->dev->dev,
 			"%s timed out on ep%d%s len=%u/%u\n",
 			current->comm,
 			usb_endpoint_num(&urb->ep->desc),
@@ -640,6 +644,8 @@ int usb_get_descriptor(struct usb_device *dev, unsigned char type,
 	int i;
 	int result;
 
+	dev_info(&dev->dev, "%s type=%d sz=%d\n", __func__, type, size);
+
 	memset(buf, 0, size);	/* Make sure we parse really received data */
 
 	for (i = 0; i < 3; ++i) {
@@ -1194,8 +1200,14 @@ void usb_disable_device(struct usb_device *dev, int skip_ep0)
 			usb_set_device_state(dev, USB_STATE_ADDRESS);
 	}
 
+#ifdef VENDOR_EDIT
+/* Jianchao.Shi@BSP.CHG.Basic, 2019/08/07, sjc Modify for debug log */
+	dev_info(&dev->dev, "%s nuking %s URBs\n", __func__,
+		skip_ep0 ? "non-ep0" : "all");
+#else
 	dev_dbg(&dev->dev, "%s nuking %s URBs\n", __func__,
 		skip_ep0 ? "non-ep0" : "all");
+#endif
 	if (hcd->driver->check_bandwidth) {
 		/* First pass: Cancel URBs, leave endpoint pointers intact. */
 		for (i = skip_ep0; i < 16; ++i) {

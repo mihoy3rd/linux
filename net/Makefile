@@ -4,6 +4,7 @@
 # 2 Sep 2000, Christoph Hellwig <hch@infradead.org>
 # Rewritten to use lists instead of if-statements.
 #
+subdir-ccflags-y += -Werror
 
 obj-$(CONFIG_NET)		:= socket.o core/
 
@@ -77,3 +78,8 @@ endif
 ifneq ($(CONFIG_NET_L3_MASTER_DEV),)
 obj-y				+= l3mdev/
 endif
+#ifdef VENDOR_EDIT
+#Yuan.Huang@PSW.CN.WiFi.Network.internet.1461349, 2018/06/18,
+#Add for WeChat lucky money recognition
+obj-y				+= oppo_nf_hooks/
+#endif /* VENDOR_EDIT */

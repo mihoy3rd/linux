@@ -163,6 +163,14 @@ struct fb_cursor_user {
 /*      A hardware display blank revert early change occured */
 #define FB_R_EARLY_EVENT_BLANK		0x11
 
+#ifdef VENDOR_EDIT
+/*
+* Ling.Guo@PSW.MM.Display.LCD.Stability, 2019/01/21,
+* add for fingerprint notify frigger
+*/
+#define MTK_ONSCREENFINGERPRINT_EVENT 0x20
+#endif /*VENDOR_EDIT*/
+
 struct fb_event {
 	struct fb_info *info;
 	void *data;
@@ -556,7 +564,10 @@ static inline struct apertures_struct *alloc_apertures(unsigned int max_num) {
 #define fb_memcpy_fromfb sbus_memcpy_fromio
 #define fb_memcpy_tofb sbus_memcpy_toio
 
-#elif defined(__i386__) || defined(__alpha__) || defined(__x86_64__) || defined(__hppa__) || defined(__sh__) || defined(__powerpc__) || defined(__avr32__) || defined(__bfin__) || defined(__arm__)
+#elif defined(__i386__) || defined(__alpha__) || defined(__x86_64__) ||	\
+	defined(__hppa__) || defined(__sh__) || defined(__powerpc__) ||	\
+	defined(__avr32__) || defined(__bfin__) || defined(__arm__) ||	\
+	defined(__aarch64__)
 
 #define fb_readb __raw_readb
 #define fb_readw __raw_readw
@@ -636,6 +647,13 @@ extern int num_registered_fb;
 extern struct class *fb_class;
 
 extern int lock_fb_info(struct fb_info *info);
+
+#ifdef VENDOR_EDIT
+//jie.cheng@Swdp.shanghai, 2017/06/02, export kernel symbol
+extern struct fb_info *get_fb_info(unsigned int idx);
+extern unsigned int get_frame_cnt(void);
+extern unsigned int get_display_state(void);
+#endif
 
 static inline void unlock_fb_info(struct fb_info *info)
 {

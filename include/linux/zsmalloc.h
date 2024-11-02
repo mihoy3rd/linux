@@ -39,7 +39,29 @@ struct zs_pool_stats {
 	unsigned long pages_compacted;
 };
 
-struct zs_pool;
+struct zs_pool {
+	const char *name;
+
+	struct size_class **size_class;
+	struct kmem_cache *handle_cachep;
+
+	gfp_t flags;	/* allocation flags used when growing pool */
+	atomic_long_t pages_allocated;
+
+	struct zs_pool_stats stats;
+
+	/* Compact classes */
+	struct shrinker shrinker;
+	/*
+	 * To signify that register_shrinker() was successful
+	 * and unregister_shrinker() will not Oops.
+	 */
+	bool shrinker_enabled;
+#ifdef CONFIG_ZSMALLOC_STAT
+	struct dentry *stat_dentry;
+#endif
+};
+//struct zs_pool;
 
 struct zs_pool *zs_create_pool(const char *name, gfp_t flags);
 void zs_destroy_pool(struct zs_pool *pool);

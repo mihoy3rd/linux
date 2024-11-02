@@ -140,6 +140,18 @@
 
 #include "net-sysfs.h"
 
+#include <net/udp.h>
+#ifdef UDP_SKT_WIFI
+#include <linux/trace_events.h>
+#endif
+
+#ifdef VENDOR_EDIT
+//Junyuan.Huang@PSW.CN.WiFi.Network.1471780, 2018/06/26,
+//Add for limit speed function
+#if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
+#include <linux/imq.h>
+#endif
+#endif /* VENDOR_EDIT */
 /* Instead of increasing this, you should create a hash table. */
 #define MAX_GRO_SKBS 8
 
@@ -2751,7 +2763,18 @@ static int xmit_one(struct sk_buff *skb, struct net_device *dev,
 	unsigned int len;
 	int rc;
 
+#ifndef VENDOR_EDIT
+//Junyuan.Huang@PSW.CN.WiFi.Network.1471780, 2018/06/26,
+//Modify for limit speed function
 	if (!list_empty(&ptype_all) || !list_empty(&dev->ptype_all))
+#else /* VENDOR_EDIT */
+#if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
+	if ((!list_empty(&ptype_all) || !list_empty(&dev->ptype_all)) &&
+		!(skb->imq_flags & IMQ_F_ENQUEUE))
+#else
+	if (!list_empty(&ptype_all) || !list_empty(&dev->ptype_all))
+#endif
+#endif /* VENDOR_EDIT */
 		dev_queue_xmit_nit(skb, dev);
 
 	len = skb->len;
@@ -2789,6 +2812,14 @@ out:
 	*ret = rc;
 	return skb;
 }
+
+#ifdef VENDOR_EDIT
+//Junyuan.Huang@PSW.CN.WiFi.Network.1471780, 2018/06/26,
+//Add for limit speed function
+#if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
+EXPORT_SYMBOL(dev_hard_start_xmit);
+#endif
+#endif /* VENDOR_EDIT */
 
 static struct sk_buff *validate_xmit_vlan(struct sk_buff *skb,
 					  netdev_features_t features)
@@ -3133,8 +3164,25 @@ static int __dev_queue_xmit(struct sk_buff *skb, void *accel_priv)
 	struct netdev_queue *txq;
 	struct Qdisc *q;
 	int rc = -ENOMEM;
+#ifdef UDP_SKT_WIFI
+	int need_wfd = (sysctl_met_is_enable == 1) && (sysctl_udp_met_port > 0);
+#endif
 
 	skb_reset_mac_header(skb);
+
+#ifdef UDP_SKT_WIFI
+	if (unlikely(need_wfd && (ip_hdr(skb)->protocol == IPPROTO_UDP) && skb->sk)) {
+		if (sysctl_udp_met_port == ntohs((inet_sk(skb->sk))->inet_sport)) {
+			struct udphdr *udp_iphdr = udp_hdr(skb);
+
+			if (udp_iphdr && (ntohs(udp_iphdr->len) >= 12)) {
+				__u16 *seq_id = (__u16 *)((char *)udp_iphdr + 10);
+
+				udp_event_trace_printk("F|%d|%s|%d\n", current->pid, *seq_id);
+			}
+		}
+	}
+#endif
 
 	if (unlikely(skb_shinfo(skb)->tx_flags & SKBTX_SCHED_TSTAMP))
 		__skb_tstamp_tx(skb, NULL, skb->sk, SCM_TSTAMP_SCHED);
@@ -6916,10 +6964,25 @@ EXPORT_SYMBOL(netdev_refcnt_read);
  * We can get stuck here if buggy protocols don't correctly
  * call dev_put.
  */
+#if defined(REFCNT_DEBUG) && defined(REFCNT_MEMORY_DEBUG)
+unsigned int trace_idx;
+EXPORT_SYMBOL(trace_idx);
+
+struct refcnt_trace trace_array[MAX_TRACE_LEN];
+EXPORT_SYMBOL(trace_array);
+#endif
+
 static void netdev_wait_allrefs(struct net_device *dev)
 {
 	unsigned long rebroadcast_time, warning_time;
 	int refcnt;
+#if defined(REFCNT_DEBUG) && defined(REFCNT_MEMORY_DEBUG)
+	bool refcnt_trace_dump = false;
+	unsigned int idx = 0;
+	unsigned int info = 0;
+	unsigned int tmp = 0;
+	struct stack_trace trace;
+#endif
 
 	linkwatch_forget_dev(dev);
 
@@ -6962,6 +7025,39 @@ static void netdev_wait_allrefs(struct net_device *dev)
 			pr_emerg("unregister_netdevice: waiting for %s to become free. Usage count = %d\n",
 				 dev->name, refcnt);
 			warning_time = jiffies;
+
+#if defined(REFCNT_DEBUG) && defined(REFCNT_MEMORY_DEBUG)
+			if (!strncmp(dev->name, "wlan0", 5) &&
+			    refcnt && !refcnt_trace_dump) {
+				refcnt_trace_dump = true;
+				trace.max_entries = MAX_TRACE_DEPTH;
+				trace.skip = TRACE_SKIP_DEPTH;
+
+				pr_info("[mtk_net]====[ wlan0 refcnt backtrace begin ]===========\n");
+				for (idx = 0; idx < MAX_TRACE_LEN; idx++) {
+					info = trace_array[idx].info;
+					tmp = (info & 0xf0000000) >> 28;
+					if (trace_array[idx].time &&
+					    (info & 0x00ffffff)) {
+						pr_info("[mtk_net] %s: cpu%d_refcnt=%d, idx=%d, pid=%d, time=%ld\n",
+							tmp == 1 ? "dev_put" :
+							"dev_hold",
+						  (info & 0x0f000000) >> 24,
+						  trace_array[idx].refcnt,
+						  idx, info & 0x00ffffff,
+						  trace_array[idx].time);
+						trace.nr_entries =
+						  trace_array[idx].entry_nr;
+						trace.entries =
+						  trace_array[idx].entry;
+						print_stack_trace(&trace, 0);
+						usleep_range(5000, 6000);
+					}
+				}
+
+				pr_info("[mtk_net]====[ wlan0 refcnt backtrace end ]===========\n");
+			}
+#endif
 		}
 	}
 }

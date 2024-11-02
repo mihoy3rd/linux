@@ -65,6 +65,7 @@
 #include <linux/zsmalloc.h>
 #include <linux/zpool.h>
 
+#define ZSMALLOC_NO_FREE_FOR_CPU_DOWN
 /*
  * This must be power of 2 and greater than of equal to sizeof(link_free).
  * These two conditions ensure that any 'struct link_free' itself doesn't
@@ -77,7 +78,12 @@
  * A single 'zspage' is composed of up to 2^N discontiguous 0-order (single)
  * pages. ZS_MAX_ZSPAGE_ORDER defines upper limit on N.
  */
+#ifndef VENDOR_EDIT //YiXue.Ge@PSW.kernel.drv 20170703 modify ZS_MAX_ZSPAGE_ORDER as 3
 #define ZS_MAX_ZSPAGE_ORDER 2
+#else
+#define ZS_MAX_ZSPAGE_ORDER 3
+#endif
+
 #define ZS_MAX_PAGES_PER_ZSPAGE (_AC(1, UL) << ZS_MAX_ZSPAGE_ORDER)
 
 #define ZS_HANDLE_SIZE (sizeof(unsigned long))
@@ -124,7 +130,12 @@
  */
 #define OBJ_ALLOCATED_TAG 1
 #define OBJ_TAG_BITS 1
+#if BITS_PER_LONG == 32
+/* minus 1 bit for large DRAM (>3GB) */
+#define OBJ_INDEX_BITS	(BITS_PER_LONG - _PFN_BITS - OBJ_TAG_BITS - 1)
+#else
 #define OBJ_INDEX_BITS	(BITS_PER_LONG - _PFN_BITS - OBJ_TAG_BITS)
+#endif
 #define OBJ_INDEX_MASK	((_AC(1, UL) << OBJ_INDEX_BITS) - 1)
 
 #define MAX(a, b) ((a) >= (b) ? (a) : (b))
@@ -241,29 +252,6 @@ struct link_free {
 	};
 };
 
-struct zs_pool {
-	const char *name;
-
-	struct size_class **size_class;
-	struct kmem_cache *handle_cachep;
-
-	gfp_t flags;	/* allocation flags used when growing pool */
-	atomic_long_t pages_allocated;
-
-	struct zs_pool_stats stats;
-
-	/* Compact classes */
-	struct shrinker shrinker;
-	/*
-	 * To signify that register_shrinker() was successful
-	 * and unregister_shrinker() will not Oops.
-	 */
-	bool shrinker_enabled;
-#ifdef CONFIG_ZSMALLOC_STAT
-	struct dentry *stat_dentry;
-#endif
-};
-
 /*
  * A zspage's class index and fullness group
  * are encoded in its (first)page->mapping
@@ -272,6 +260,12 @@ struct zs_pool {
 #define FULLNESS_BITS	4
 #define CLASS_IDX_MASK	((1 << CLASS_IDX_BITS) - 1)
 #define FULLNESS_MASK	((1 << FULLNESS_BITS) - 1)
+
+#ifdef VENDOR_EDIT //YiXue.Ge@PSW.kernel.drv 20170703 modify ZS_MAX_ZSPAGE_ORDER as 3
+#define ISOLATED_BITS	(ZS_MAX_ZSPAGE_ORDER+1)
+#else
+#define ISOLATED_BITS	3
+#endif
 
 struct mapping_area {
 #ifdef CONFIG_PGTABLE_MAPPING
@@ -1044,9 +1038,11 @@ static inline int __zs_cpu_up(struct mapping_area *area)
 
 static inline void __zs_cpu_down(struct mapping_area *area)
 {
+#ifndef ZSMALLOC_NO_FREE_FOR_CPU_DOWN
 	if (area->vm)
 		free_vm_area(area->vm);
 	area->vm = NULL;
+#endif
 }
 
 static inline void *__zs_map_object(struct mapping_area *area,
@@ -1083,8 +1079,10 @@ static inline int __zs_cpu_up(struct mapping_area *area)
 
 static inline void __zs_cpu_down(struct mapping_area *area)
 {
+#ifndef ZSMALLOC_NO_FREE_FOR_CPU_DOWN
 	kfree(area->vm_buf);
 	area->vm_buf = NULL;
+#endif
 }
 
 static void *__zs_map_object(struct mapping_area *area,

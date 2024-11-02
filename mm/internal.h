@@ -184,6 +184,19 @@ extern bool is_free_buddy_page(struct page *page);
 #endif
 extern int user_min_free_kbytes;
 
+#ifdef CONFIG_CMA
+static inline int is_cma_page(struct page *page)
+{
+	unsigned mt = get_pageblock_migratetype(page);
+
+	if (mt == MIGRATE_ISOLATE || mt == MIGRATE_CMA)
+		return true;
+	return false;
+}
+#else
+#define is_cma_page(page) 0
+#endif
+
 #if defined CONFIG_COMPACTION || defined CONFIG_CMA
 
 /*
@@ -446,6 +459,10 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
 #define ALLOC_CPUSET		0x40 /* check for correct cpuset */
 #define ALLOC_CMA		0x80 /* allow allocations from CMA areas */
 #define ALLOC_FAIR		0x100 /* fair zone allocation */
+#ifdef VENDOR_EDIT
+/* Huacai.Zhou@PSW.BSP.Kernel.MM, 2018-01-12, add for unmovable allocation */
+#define ALLOC_UNMOVABLE 0x200 /* migratetype is MIGRATE_UNMOVABLE */
+#endif
 
 enum ttu_flags;
 struct tlbflush_unmap_batch;
@@ -465,4 +482,14 @@ static inline void flush_tlb_batched_pending(struct mm_struct *mm)
 {
 }
 #endif /* CONFIG_ARCH_WANT_BATCHED_UNMAP_TLB_FLUSH */
+
+#ifdef CONFIG_MTK_ION
+extern void ion_mm_heap_memory_detail(void);
+#endif
+#ifdef CONFIG_MTK_GPU_SUPPORT
+extern bool mtk_dump_gpu_memory_usage(void);
+#endif
+
+#define IS_ZONE_MOVABLE_CMA_ZONE(z)	IS_ZONE_MOVABLE_CMA_ZONE_IDX(zone_idx(z))
+
 #endif	/* __MM_INTERNAL_H */

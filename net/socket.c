@@ -358,6 +358,12 @@ struct file *sock_alloc_file(struct socket *sock, int flags, const char *dname)
 	struct qstr name = { .name = "" };
 	struct path path;
 	struct file *file;
+#ifdef VENDOR_EDIT
+//Runsheng.Pei@PSW.Android.OppoFeature.TrafficMonitor, 2015/08/01, add for net comsuption statistics for
+//process which use the same uid.
+	struct pid *pid;
+	struct task_struct *task;
+#endif /* VENDOR_EDIT */
 
 	if (dname) {
 		name.name = dname;
@@ -385,6 +391,20 @@ struct file *sock_alloc_file(struct socket *sock, int flags, const char *dname)
 	sock->file = file;
 	file->f_flags = O_RDWR | (flags & O_NONBLOCK);
 	file->private_data = sock;
+#ifdef VENDOR_EDIT
+//Jiemin.Zhu@PSW.Android.OppoFeature.TrafficMonitor, 2016/10/28,
+//add for count TCP_TIME_WAIT state to corresponding process
+	pid = find_get_pid(current->tgid);
+	if (pid) {
+		task = get_pid_task(pid, PIDTYPE_PID);
+		if (task && sock->sk) {
+			sock->sk->skc_uid = from_kuid(&init_user_ns, sock->file->f_cred->fsuid);
+			strncpy(sock->sk->sk_cmdline, task->comm, TASK_COMM_LEN);
+		}
+		put_task_struct(task);
+	}
+	put_pid(pid);
+#endif /* VENDOR_EDIT */
 	return file;
 }
 EXPORT_SYMBOL(sock_alloc_file);
@@ -521,9 +541,26 @@ static ssize_t sockfs_listxattr(struct dentry *dentry, char *buffer,
 	return used;
 }
 
+static int sockfs_setattr(struct dentry *dentry, struct iattr *iattr)
+{
+	int err = simple_setattr(dentry, iattr);
+
+	if (!err && (iattr->ia_valid & ATTR_UID)) {
+		struct socket *sock = SOCKET_I(d_inode(dentry));
+
+		if (sock->sk)
+			sock->sk->sk_uid = iattr->ia_uid;
+		else
+			err = -ENOENT;
+	}
+
+	return err;
+}
+
 static const struct inode_operations sockfs_inode_ops = {
 	.getxattr = sockfs_getxattr,
 	.listxattr = sockfs_listxattr,
+	.setattr = sockfs_setattr,
 };
 
 /**
@@ -565,12 +602,15 @@ static struct socket *sock_alloc(void)
  *	an inode not a file.
  */
 
-void sock_release(struct socket *sock)
+static void __sock_release(struct socket *sock, struct inode *inode)
 {
 	if (sock->ops) {
 		struct module *owner = sock->ops->owner;
-
+		if (inode)
+			inode_lock(inode);
 		sock->ops->release(sock);
+		if (inode)
+			inode_unlock(inode);
 		sock->ops = NULL;
 		module_put(owner);
 	}
@@ -584,6 +624,11 @@ void sock_release(struct socket *sock)
 		return;
 	}
 	sock->file = NULL;
+}
+
+void sock_release(struct socket *sock)
+{
+	__sock_release(sock, NULL);
 }
 EXPORT_SYMBOL(sock_release);
 
@@ -1021,7 +1066,18 @@ static int sock_mmap(struct file *file, struct vm_area_struct *vma)
 
 static int sock_close(struct inode *inode, struct file *filp)
 {
-	sock_release(SOCKET_I(inode));
+#ifdef CONFIG_MTK_NET_LOGGING
+	struct socket *sock = SOCKET_I(inode);
+    
+
+	if (sock && sock->sk) {
+		pr_info_ratelimited("[mtk_net][socekt]socket_close[%lu] refcnt: %d\n",
+				    inode->i_ino, atomic_read(&sock->sk->sk_refcnt));
+	} else {
+		pr_info_ratelimited("[mtk_net][socekt]socket_close[%lu]\n", inode->i_ino);
+	}
+#endif
+    __sock_release(SOCKET_I(inode), inode);
 	return 0;
 }
 
@@ -1110,8 +1166,8 @@ int __sock_create(struct net *net, int family, int type, int protocol,
 		static int warned;
 		if (!warned) {
 			warned = 1;
-			pr_info("%s uses obsolete (PF_INET,SOCK_PACKET)\n",
-				current->comm);
+			pr_info_ratelimited("%s uses obsolete (PF_INET,SOCK_PACKET)\n",
+					    current->comm);
 		}
 		family = PF_PACKET;
 	}
@@ -1241,6 +1297,13 @@ SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
 
 out:
 	/* It may be already another descriptor 8) Not kernel problem. */
+
+ #ifdef CONFIG_MTK_NET_LOGGING
+	if ((retval >= 0) && sock && SOCK_INODE(sock))
+		pr_info_ratelimited("[mtk_net][socket]socket_create[%lu]:fd=%d\n", SOCK_INODE(sock)->i_ino, retval);
+	 else
+		pr_info_ratelimited("[mtk_net][socket]socket_create:fd=%d\n", retval);
+#endif
 	return retval;
 
 out_release:
@@ -1350,6 +1413,9 @@ out_release_both:
 out_release_1:
 	sock_release(sock1);
 out:
+	#ifdef CONFIG_MTK_NET_LOGGING
+	pr_info_ratelimited("[mtk_net][socket]socketpair fail2: %d\n", err);
+    #endif
 	return err;
 }
 
@@ -1378,6 +1444,11 @@ SYSCALL_DEFINE3(bind, int, fd, struct sockaddr __user *, umyaddr, int, addrlen)
 				err = sock->ops->bind(sock,
 						      (struct sockaddr *)
 						      &address, addrlen);
+#ifdef CONFIG_MTK_NET_LOGGING
+	if ((((struct sockaddr_in *)&address)->sin_family) != AF_UNIX)
+		pr_info_ratelimited("[mtk_net][socket] bind addr->sin_port:%d,err:%d\n",
+				    htons(((struct sockaddr_in *)&address)->sin_port), err);
+#endif
 		}
 		fput_light(sock->file, fput_needed);
 	}
@@ -1493,6 +1564,12 @@ SYSCALL_DEFINE4(accept4, int, fd, struct sockaddr __user *, upeer_sockaddr,
 
 	fd_install(newfd, newfile);
 	err = newfd;
+	if ((err >= 0) && newsock && SOCK_INODE(newsock)) {
+#ifdef CONFIG_MTK_NET_LOGGING
+		pr_info_ratelimited("[mtk_net][socket]socket_accept:fd=%d,server_sock[%lu], newsock[%lu]\n",
+				    err, SOCK_INODE(sock)->i_ino, SOCK_INODE(newsock)->i_ino);
+#endif
+	    }
 
 out_put:
 	fput_light(sock->file, fput_needed);
@@ -1959,8 +2036,10 @@ static int ___sys_sendmsg(struct socket *sock, struct user_msghdr __user *msg,
 	}
 
 out_freectl:
-	if (ctl_buf != ctl)
+	if (ctl_buf != ctl) 
 		sock_kfree_s(sock->sk, ctl_buf, ctl_len);
+
+
 out_freeiov:
 	kfree(iov);
 	return err;
@@ -2452,7 +2531,7 @@ int sock_register(const struct net_proto_family *ops)
 	}
 	spin_unlock(&net_family_lock);
 
-	pr_info("NET: Registered protocol family %d\n", ops->family);
+	pr_info_ratelimited("NET: Registered protocol family %d\n", ops->family);
 	return err;
 }
 EXPORT_SYMBOL(sock_register);
@@ -2480,7 +2559,7 @@ void sock_unregister(int family)
 
 	synchronize_rcu();
 
-	pr_info("NET: Unregistered protocol family %d\n", family);
+	pr_info_ratelimited("NET: Unregistered protocol family %d\n", family);
 }
 EXPORT_SYMBOL(sock_unregister);
 

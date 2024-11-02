@@ -87,6 +87,11 @@ void __init_rwsem(struct rw_semaphore *sem, const char *name,
 	sem->owner = NULL;
 	osq_lock_init(&sem->osq);
 #endif
+#ifdef VENDOR_EDIT
+// Liujie.Xie@TECH.Kernel.Sched, 2019/05/22, add for ui first
+    sem->ux_dep_task = NULL;
+#endif
+
 }
 
 EXPORT_SYMBOL(__init_rwsem);
@@ -225,7 +230,12 @@ struct rw_semaphore __sched *rwsem_down_read_failed(struct rw_semaphore *sem)
 	raw_spin_lock_irq(&sem->wait_lock);
 	if (list_empty(&sem->wait_list))
 		adjustment += RWSEM_WAITING_BIAS;
+#if defined(VENDOR_EDIT) && defined(CONFIG_OPPO_VIP_THREAD)
+// Liujie.Xie@TECH.Kernel.Sched, 2019/05/22, add for vip thread
+	rwsem_list_add(tsk, &waiter.list, &sem->wait_list);
+#else
 	list_add_tail(&waiter.list, &sem->wait_list);
+#endif
 
 	/* we're now waiting on the lock, but no longer actively locking */
 	count = rwsem_atomic_update(adjustment, sem);
@@ -239,6 +249,12 @@ struct rw_semaphore __sched *rwsem_down_read_failed(struct rw_semaphore *sem)
 	    (count > RWSEM_WAITING_BIAS &&
 	     adjustment != -RWSEM_ACTIVE_READ_BIAS))
 		sem = __rwsem_do_wake(sem, RWSEM_WAKE_ANY);
+#ifdef VENDOR_EDIT
+// Liujie.Xie@TECH.Kernel.Sched, 2019/05/22, add for ui first
+	if (sysctl_uifirst_enabled) {
+		rwsem_dynamic_ux_enqueue(current, waiter.task, READ_ONCE(sem->owner), sem);
+	}
+#endif
 
 	raw_spin_unlock_irq(&sem->wait_lock);
 
@@ -476,6 +492,12 @@ struct rw_semaphore __sched *rwsem_down_write_failed(struct rw_semaphore *sem)
 
 	} else
 		count = rwsem_atomic_update(RWSEM_WAITING_BIAS, sem);
+#ifdef VENDOR_EDIT
+// Liujie.Xie@TECH.Kernel.Sched, 2019/05/22, add for ui first
+	if (sysctl_uifirst_enabled) {
+		rwsem_dynamic_ux_enqueue(waiter.task, current, READ_ONCE(sem->owner), sem);
+	}
+#endif
 
 	/* wait until we successfully acquire the lock */
 	set_current_state(TASK_UNINTERRUPTIBLE);
@@ -492,6 +514,7 @@ struct rw_semaphore __sched *rwsem_down_write_failed(struct rw_semaphore *sem)
 
 		raw_spin_lock_irq(&sem->wait_lock);
 	}
+
 	__set_current_state(TASK_RUNNING);
 
 	list_del(&waiter.list);
@@ -509,6 +532,41 @@ __visible
 struct rw_semaphore *rwsem_wake(struct rw_semaphore *sem)
 {
 	unsigned long flags;
+
+	/*
+	 * If a spinner is present, there is a chance that the load of
+	 * rwsem_has_spinner() in rwsem_wake() can be reordered with
+	 * respect to decrement of rwsem count in __up_write() leading
+	 * to wakeup being missed.
+	 *
+	 * spinning writer                  up_write caller
+	 * ---------------                  -----------------------
+	 * [S] osq_unlock()                 [L] osq
+	 *  spin_lock(wait_lock)
+	 *  sem->count=0xFFFFFFFF00000001
+	 *            +0xFFFFFFFF00000000
+	 *  count=sem->count
+	 *  MB
+	 *                                   sem->count=0xFFFFFFFE00000001
+	 *                                             -0xFFFFFFFF00000001
+	 *                                   RMB
+	 *                                   spin_trylock(wait_lock)
+	 *                                   return
+	 * rwsem_try_write_lock(count)
+	 * spin_unlock(wait_lock)
+	 * schedule()
+	 *
+	 * Reordering of atomic_long_sub_return_release() in __up_write()
+	 * and rwsem_has_spinner() in rwsem_wake() can cause missing of
+	 * wakeup in up_write() context. In spinning writer, sem->count
+	 * and local variable count is 0XFFFFFFFE00000001. It would result
+	 * in rwsem_try_write_lock() failing to acquire rwsem and spinning
+	 * writer going to sleep in rwsem_down_write_failed().
+	 *
+	 * The smp_rmb() here is to make sure that the spinner state is
+	 * consulted after sem->count is updated in up_write context.
+	 */
+	smp_rmb();
 
 	/*
 	 * If a spinner is present, it is not necessary to do the wakeup.
@@ -546,7 +604,12 @@ locked:
 	/* do nothing if list empty */
 	if (!list_empty(&sem->wait_list))
 		sem = __rwsem_do_wake(sem, RWSEM_WAKE_ANY);
-
+#ifdef VENDOR_EDIT
+// Liujie.Xie@TECH.Kernel.Sched, 2019/05/22, add for ui first
+	if (sysctl_uifirst_enabled) {
+		rwsem_dynamic_ux_dequeue(sem, current);
+	}
+#endif
 	raw_spin_unlock_irqrestore(&sem->wait_lock, flags);
 
 	return sem;

@@ -422,7 +422,7 @@ struct dst_entry *inet_csk_route_req(const struct sock *sk,
 			   sk->sk_protocol, inet_sk_flowi_flags(sk),
 			   (opt && opt->opt.srr) ? opt->opt.faddr : ireq->ir_rmt_addr,
 			   ireq->ir_loc_addr, ireq->ir_rmt_port,
-			   htons(ireq->ir_num));
+			   htons(ireq->ir_num), sk->sk_uid);
 	security_req_classify_flow(req, flowi4_to_flowi(fl4));
 	rt = ip_route_output_flow(net, fl4, sk);
 	if (IS_ERR(rt))
@@ -458,7 +458,7 @@ struct dst_entry *inet_csk_route_child_sock(const struct sock *sk,
 			   sk->sk_protocol, inet_sk_flowi_flags(sk),
 			   (opt && opt->opt.srr) ? opt->opt.faddr : ireq->ir_rmt_addr,
 			   ireq->ir_loc_addr, ireq->ir_rmt_port,
-			   htons(ireq->ir_num));
+			   htons(ireq->ir_num), sk->sk_uid);
 	security_req_classify_flow(req, flowi4_to_flowi(fl4));
 	rt = ip_route_output_flow(net, fl4, sk);
 	if (IS_ERR(rt))
@@ -609,7 +609,7 @@ static void reqsk_timer_handler(unsigned long data)
 
 		if (req->num_timeout++ == 0)
 			atomic_dec(&queue->young);
-		timeo = min(TCP_TIMEOUT_INIT << req->num_timeout, TCP_RTO_MAX);
+		timeo = min(TCP_TIMEOUT_INIT << req->num_timeout, sysctl_tcp_rto_max);
 		mod_timer_pinned(&req->rsk_timer, jiffies + timeo);
 		return;
 	}
@@ -754,6 +754,10 @@ int inet_csk_listen_start(struct sock *sk, int backlog)
 	if (!sk->sk_prot->get_port(sk, inet->inet_num)) {
 		inet->inet_sport = htons(inet->inet_num);
 
+#ifdef CONFIG_MTK_NET_LOGGING
+	pr_info("[mtk_net][socket] inet_csk_listen_start inet->inet_sport:%d,inet->inet_num:%d",
+		inet->inet_sport, inet->inet_num);
+#endif
 		sk_dst_reset(sk);
 		sk->sk_prot->hash(sk);
 
@@ -956,6 +960,16 @@ struct dst_entry *inet_csk_update_pmtu(struct sock *sk, u32 mtu)
 			goto out;
 	}
 	dst->ops->update_pmtu(dst, sk, NULL, mtu);
+
+	#ifdef VENDOR_EDIT
+	//Rongzheng.tang@PSW.CN.WiFi.Network.internet.1066205, 2016/11/03,
+	//Add for [873764] when receives ICMP_FRAG_NEEDED, reduces the mtu of net_device.
+	pr_err("%s: current_mtu = %d , frag_mtu = %d \n", __func__, dst->dev->mtu, dst_mtu(dst));
+
+	if(dst->dev->mtu > dst_mtu(dst) && dst_mtu(dst) > 1280) {
+		dst->dev->mtu = dst_mtu(dst);
+	}
+	#endif /* VENDOR_EDIT */
 
 	dst = __sk_dst_check(sk, 0);
 	if (!dst)

@@ -342,7 +342,11 @@ struct kmem_cache_node {
 #ifdef CONFIG_SLUB
 	unsigned long nr_partial;
 	struct list_head partial;
-#ifdef CONFIG_SLUB_DEBUG
+#if defined(CONFIG_SLUB_DEBUG) || (defined(VENDOR_EDIT) &&\
+		defined(CONFIG_SLUB_STAT_DEBUG))
+/* Kui.Zhang@PSW.BSP.Kernel.Performance, 2018-11-12, if SLUB_STAT_DEBUG is
+ * is enabled, /proc/slabinfo is created for getting more slab details.
+ */
 	atomic_long_t nr_slabs;
 	atomic_long_t total_objects;
 	struct list_head full;
@@ -370,5 +374,7 @@ void *slab_start(struct seq_file *m, loff_t *pos);
 void *slab_next(struct seq_file *m, void *p, loff_t *pos);
 void slab_stop(struct seq_file *m, void *p);
 int memcg_slab_show(struct seq_file *m, void *p);
+
+void ___cache_free(struct kmem_cache *cache, void *x, unsigned long addr);
 
 #endif /* MM_SLAB_H */
